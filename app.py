@@ -1,7 +1,11 @@
 """
-app.py — Streamlit POC
-======================
+app.py — Streamlit POC (Streamlit Cloud ready)
+==============================================
 Paste a community URL → scrape it → render the branded landing page inline.
+
+Secrets handling:
+  - Streamlit Cloud: reads OPENAI_API_KEY from st.secrets (set via Streamlit UI)
+  - Local dev: reads OPENAI_API_KEY from .env file
 
 Run:
     streamlit run app.py
@@ -19,23 +23,31 @@ from urllib.parse import urlparse
 
 import streamlit as st
 import streamlit.components.v1 as components
-from dotenv import load_dotenv
+
+# Load .env file if present (local dev only — ignored on Streamlit Cloud)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 from scraper_core import ImageDownloader, LLMAgent, scrape_single_url, slugify
 from page_renderer import render_community_page
 
-# Windows asyncio fix for Playwright
+# Windows asyncio fix for Playwright (no effect on Linux / Streamlit Cloud)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-7s | %(message)s",
     datefmt="%H:%M:%S",
 )
+logger = logging.getLogger("app")
 
+# ═════════════════════════════════════════════════════════════════════════════
+#  PATHS
+# ═════════════════════════════════════════════════════════════════════════════
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGES_DIR = OUTPUT_DIR / "images"
@@ -46,6 +58,32 @@ PAGES_DIR.mkdir(parents=True, exist_ok=True)
 LOGO_PATH = Path(__file__).parent / "logo.png"
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+#  SECRETS — works on both local (.env) and Streamlit Cloud (st.secrets)
+# ═════════════════════════════════════════════════════════════════════════════
+def get_api_key() -> str:
+    """
+    Fetch OpenAI API key from (in order):
+    1. Streamlit Cloud secrets (st.secrets)
+    2. Local environment / .env file
+    Returns empty string if not found.
+    """
+    # Try Streamlit secrets first (for cloud deployment)
+    try:
+        if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+            key = str(st.secrets["OPENAI_API_KEY"]).strip()
+            if key:
+                return key
+    except Exception:
+        pass
+
+    # Fall back to environment / .env (for local dev)
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  LOGO
+# ═════════════════════════════════════════════════════════════════════════════
 def _logo_as_base64() -> str:
     """Load the Team La·Casa logo and return as base64 data URI for embedding."""
     if LOGO_PATH.exists():
@@ -75,11 +113,7 @@ st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Montserrat:wght@300;400;500;600&display=swap');
 
-  /* Remove Streamlit default header/padding that causes the top gap */
-  header[data-testid="stHeader"] {
-    background: transparent !important;
-    height: 0 !important;
-  }
+  header[data-testid="stHeader"] { background: transparent !important; height: 0 !important; }
   .stApp > header { display: none !important; }
   [data-testid="stToolbar"] { display: none !important; }
   #MainMenu { display: none !important; }
@@ -92,7 +126,6 @@ st.markdown("""
     max-width: 1100px;
   }
 
-  /* ── Top branding bar ────────────────────────────────────────────── */
   .brand-bar {
     background: #0f1923;
     margin: 0 -1rem 40px -1rem;
@@ -102,11 +135,7 @@ st.markdown("""
     gap: 16px;
     border-bottom: 2px solid #c9a050;
   }
-  .brand-bar img {
-    height: 42px;
-    width: auto;
-    display: block;
-  }
+  .brand-bar img { height: 42px; width: auto; display: block; }
   .brand-bar .brand-tagline {
     margin-left: auto;
     color: rgba(255,255,255,0.45);
@@ -123,7 +152,6 @@ st.markdown("""
     letter-spacing: 0.5px;
   }
 
-  /* ── Main header ─────────────────────────────────────────────────── */
   h1.app-title {
     font-family: 'Cormorant Garamond', serif !important;
     font-weight: 300 !important;
@@ -151,7 +179,6 @@ st.markdown("""
     max-width: 720px;
   }
 
-  /* ── Input field ─────────────────────────────────────────────────── */
   .stTextInput input {
     font-family: 'Montserrat', sans-serif !important;
     font-size: 14px !important;
@@ -167,7 +194,6 @@ st.markdown("""
   }
   .stTextInput label { display: none !important; }
 
-  /* ── Button ──────────────────────────────────────────────────────── */
   .stButton button {
     background: #0f1923 !important;
     color: #c9a050 !important;
@@ -188,7 +214,6 @@ st.markdown("""
   }
   .stButton button:disabled { opacity: 0.5 !important; }
 
-  /* ── Other elements ──────────────────────────────────────────────── */
   [data-testid="stStatusWidget"] { font-family: 'Montserrat', sans-serif !important; }
   .stAlert {
     font-family: 'Montserrat', sans-serif !important;
@@ -223,7 +248,6 @@ st.markdown("""
     font-family: 'Montserrat', sans-serif;
   }
 
-  /* Footer */
   .app-footer {
     text-align:center;
     color:#999;
@@ -233,7 +257,6 @@ st.markdown("""
     padding:20px 0;
   }
 
-  /* Metric cards */
   [data-testid="stMetricValue"] {
     font-family: 'Cormorant Garamond', serif !important;
     color: #0f1923 !important;
@@ -246,12 +269,34 @@ st.markdown("""
     text-transform: uppercase !important;
     color: #7a7a7a !important;
   }
+
+  /* Error / config box */
+  .config-error {
+    background: #fff;
+    border-left: 4px solid #8b0000;
+    padding: 20px 24px;
+    border-radius: 3px;
+    margin: 20px 0;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 13px;
+    color: #333;
+    line-height: 1.7;
+  }
+  .config-error strong { color: #8b0000; display: block; margin-bottom: 8px; font-size: 14px; }
+  .config-error code {
+    background: #f5f0e8;
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #0f1923;
+  }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  BRANDING BAR (TOP)
+#  BRANDING BAR
 # ═════════════════════════════════════════════════════════════════════════════
 if LOGO_URI:
     st.markdown(f"""
@@ -261,7 +306,6 @@ if LOGO_URI:
 </div>
 """, unsafe_allow_html=True)
 else:
-    # Fallback if logo.png is missing
     st.markdown("""
 <div class="brand-bar">
   <span class="brand-text">Team La·Casa</span>
@@ -297,6 +341,27 @@ st.markdown(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+#  API KEY CHECK (early — before rendering the form)
+# ═════════════════════════════════════════════════════════════════════════════
+api_key = get_api_key()
+
+if not api_key:
+    st.markdown("""
+<div class="config-error">
+  <strong>⚠️ OpenAI API key is not configured</strong>
+  <div>This app needs an OpenAI API key to function. To fix:</div>
+  <br>
+  <div><b>On Streamlit Cloud:</b> Go to your app settings → Secrets → add this line:</div>
+  <div style="margin-left:18px;margin-top:4px;"><code>OPENAI_API_KEY = "sk-your-key-here"</code></div>
+  <br>
+  <div><b>Locally:</b> Create a <code>.env</code> file in the project folder with:</div>
+  <div style="margin-left:18px;margin-top:4px;"><code>OPENAI_API_KEY=sk-your-key-here</code></div>
+</div>
+""", unsafe_allow_html=True)
+    st.stop()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 #  INPUT FORM
 # ═════════════════════════════════════════════════════════════════════════════
 col1, col2 = st.columns([4, 1])
@@ -309,21 +374,6 @@ with col1:
     )
 with col2:
     generate_clicked = st.button("Generate Page", use_container_width=True)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  API KEY CHECK
-# ═════════════════════════════════════════════════════════════════════════════
-api_key = os.getenv("OPENAI_API_KEY", "").strip()
-if not api_key:
-    try:
-        api_key = st.secrets.get("OPENAI_API_KEY", "").strip()
-    except Exception:
-        api_key = ""
-
-if not api_key:
-    st.error("⚠️ OPENAI_API_KEY is not configured. Set it in `.env` or Streamlit secrets.")
-    st.stop()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -380,11 +430,14 @@ def run_scrape(url: str):
             slug = slugify(data.get("community_name", "")) or "community"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{slug}_{timestamp}.html"
-            filepath = PAGES_DIR / filename
-            filepath.write_text(html, encoding="utf-8")
-
-            json_path = PAGES_DIR / f"{slug}_{timestamp}.json"
-            json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            try:
+                filepath = PAGES_DIR / filename
+                filepath.write_text(html, encoding="utf-8")
+                json_path = PAGES_DIR / f"{slug}_{timestamp}.json"
+                json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception as e:
+                # Write failures shouldn't kill the app (Streamlit Cloud has ephemeral FS)
+                logger.warning("Could not save local snapshot: %s", e)
 
             st.session_state.result_html = html
             st.session_state.result_data = data
@@ -397,9 +450,12 @@ def run_scrape(url: str):
             )
 
         except Exception as e:
-            logging.exception("Scrape failed")
-            status_box.update(label=f"❌ Error: {e}", state="error")
-            st.session_state.error_msg = f"Unexpected error: {e}"
+            logger.exception("Scrape failed")
+            status_box.update(label=f"❌ Error: {type(e).__name__}", state="error")
+            st.session_state.error_msg = (
+                f"Unexpected error while scraping — {type(e).__name__}. "
+                "Please try again or use a different URL."
+            )
 
 
 if generate_clicked:
@@ -427,14 +483,13 @@ if st.session_state.result_html:
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
     name = data.get("community_name", "Community")
-    loc = data.get("location", "")
-    status = data.get("status", "")
+    status_val = data.get("status", "")
     units = data.get("properties", [])
     imgs = data.get("all_images", [])
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Community", name[:30] + ("…" if len(name) > 30 else ""))
-    m2.metric("Status", status or "—")
+    m2.metric("Status", status_val or "—")
     m3.metric("Units", len(units))
     m4.metric("Images", len(imgs))
 
