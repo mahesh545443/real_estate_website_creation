@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -28,6 +30,34 @@ except ImportError:
     HAS_PIL = False
 
 logger = logging.getLogger("ScraperCore")
+
+# Flag to ensure we only try to install Chromium once per process
+_CHROMIUM_INSTALLED = False
+
+
+def _ensure_chromium_installed():
+    """
+    On hosts like Streamlit Cloud, Chromium isn't pre-installed.
+    First time we need it, run `playwright install chromium`.
+    Safe to call many times — only actually runs once.
+    """
+    global _CHROMIUM_INSTALLED
+    if _CHROMIUM_INSTALLED:
+        return
+    try:
+        logger.info("Ensuring Chromium is installed (first-run check)...")
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            logger.info("✓ Chromium ready")
+        else:
+            logger.warning("playwright install returned %d: %s",
+                           result.returncode, result.stderr[:500])
+    except Exception as e:
+        logger.warning("Could not auto-install Chromium: %s", e)
+    _CHROMIUM_INSTALLED = True
 
 SKIP_IMAGE_KEYWORDS = [
     "logo", "icon", "cookie", "favicon", "sprite", "social",
@@ -701,6 +731,9 @@ async def scrape_single_url(
             except Exception:
                 pass
         logger.info("[%s] %s", stage, detail)
+
+    # Make sure Chromium is available (no-op if already installed)
+    _ensure_chromium_installed()
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
