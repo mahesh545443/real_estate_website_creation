@@ -34,7 +34,6 @@ except Exception:
 from scraper_core import ImageDownloader, LLMAgent, scrape_single_url, slugify
 from page_renderer import render_community_page
 
-# Windows asyncio fix for Playwright (no effect on Linux / Streamlit Cloud)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -45,9 +44,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  PATHS
-# ═════════════════════════════════════════════════════════════════════════════
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGES_DIR = OUTPUT_DIR / "images"
@@ -58,17 +54,7 @@ PAGES_DIR.mkdir(parents=True, exist_ok=True)
 LOGO_PATH = Path(__file__).parent / "logo.png"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  SECRETS — works on both local (.env) and Streamlit Cloud (st.secrets)
-# ═════════════════════════════════════════════════════════════════════════════
 def get_api_key() -> str:
-    """
-    Fetch OpenAI API key from (in order):
-    1. Streamlit Cloud secrets (st.secrets)
-    2. Local environment / .env file
-    Returns empty string if not found.
-    """
-    # Try Streamlit secrets first (for cloud deployment)
     try:
         if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
             key = str(st.secrets["OPENAI_API_KEY"]).strip()
@@ -76,16 +62,10 @@ def get_api_key() -> str:
                 return key
     except Exception:
         pass
-
-    # Fall back to environment / .env (for local dev)
     return os.getenv("OPENAI_API_KEY", "").strip()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  LOGO
-# ═════════════════════════════════════════════════════════════════════════════
 def _logo_as_base64() -> str:
-    """Load the Team La·Casa logo and return as base64 data URI for embedding."""
     if LOGO_PATH.exists():
         try:
             with open(LOGO_PATH, "rb") as f:
@@ -99,9 +79,6 @@ def _logo_as_base64() -> str:
 LOGO_URI = _logo_as_base64()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  PAGE CONFIG + STYLING
-# ═════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
     page_title="Team La·Casa — Landing Page Generator",
     page_icon="🏡",
@@ -126,30 +103,53 @@ st.markdown("""
     max-width: 1100px;
   }
 
+  /* ── Top branding bar — WHITE background so navy logo is visible ──── */
   .brand-bar {
-    background: #0f1923;
-    margin: 0 -1rem 40px -1rem;
-    padding: 18px 48px;
+    background: #ffffff;
+    margin: 0 -1rem 48px -1rem;
+    padding: 28px 56px;
     display: flex;
     align-items: center;
-    gap: 16px;
-    border-bottom: 2px solid #c9a050;
+    justify-content: space-between;
+    border-bottom: 3px solid #c9a050;
+    box-shadow: 0 2px 12px rgba(15, 25, 35, 0.06);
   }
-  .brand-bar img { height: 42px; width: auto; display: block; }
+  .brand-bar .brand-logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .brand-bar img {
+    height: 80px;
+    width: auto;
+    display: block;
+    transition: transform 0.3s ease;
+  }
+  .brand-bar img:hover {
+    transform: scale(1.02);
+  }
   .brand-bar .brand-tagline {
-    margin-left: auto;
-    color: rgba(255,255,255,0.45);
+    color: #0f1923;
     font-family: 'Montserrat', sans-serif;
-    font-size: 10px;
-    letter-spacing: 3px;
+    font-size: 11px;
+    letter-spacing: 4px;
     text-transform: uppercase;
+    font-weight: 600;
+    padding: 8px 18px;
+    border: 1px solid #c9a050;
+    border-radius: 2px;
+    background: linear-gradient(135deg, #fdf9f2, #f5f0e8);
   }
-  .brand-bar .brand-text {
-    color: #fff;
+  .brand-bar .brand-text-fallback {
+    color: #0f1923;
     font-family: 'Cormorant Garamond', serif;
-    font-size: 22px;
+    font-size: 36px;
     font-weight: 400;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
+  }
+  .brand-bar .brand-text-fallback em {
+    color: #c9a050;
+    font-style: italic;
   }
 
   h1.app-title {
@@ -270,7 +270,6 @@ st.markdown("""
     color: #7a7a7a !important;
   }
 
-  /* Error / config box */
   .config-error {
     background: #fff;
     border-left: 4px solid #8b0000;
@@ -291,24 +290,38 @@ st.markdown("""
     font-size: 12px;
     color: #0f1923;
   }
+
+  /* Responsive — smaller on mobile */
+  @media (max-width: 768px) {
+    .brand-bar {
+      padding: 20px 24px;
+      flex-direction: column;
+      gap: 16px;
+      text-align: center;
+    }
+    .brand-bar img { height: 60px; }
+    .brand-bar .brand-tagline { font-size: 9px; padding: 6px 14px; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  BRANDING BAR
+#  BRANDING BAR — white background, logo prominently displayed
 # ═════════════════════════════════════════════════════════════════════════════
 if LOGO_URI:
     st.markdown(f"""
 <div class="brand-bar">
-  <img src="{LOGO_URI}" alt="Team La·Casa">
+  <div class="brand-logo-wrap">
+    <img src="{LOGO_URI}" alt="Team La·Casa">
+  </div>
   <span class="brand-tagline">Landing Page Generator</span>
 </div>
 """, unsafe_allow_html=True)
 else:
     st.markdown("""
 <div class="brand-bar">
-  <span class="brand-text">Team La·Casa</span>
+  <span class="brand-text-fallback">Team <em>La·Casa</em></span>
   <span class="brand-tagline">Landing Page Generator</span>
 </div>
 """, unsafe_allow_html=True)
@@ -341,7 +354,7 @@ st.markdown(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  API KEY CHECK (early — before rendering the form)
+#  API KEY CHECK
 # ═════════════════════════════════════════════════════════════════════════════
 api_key = get_api_key()
 
@@ -436,7 +449,6 @@ def run_scrape(url: str):
                 json_path = PAGES_DIR / f"{slug}_{timestamp}.json"
                 json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             except Exception as e:
-                # Write failures shouldn't kill the app (Streamlit Cloud has ephemeral FS)
                 logger.warning("Could not save local snapshot: %s", e)
 
             st.session_state.result_html = html
