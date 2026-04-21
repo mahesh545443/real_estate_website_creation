@@ -338,6 +338,8 @@ if "result_filename" not in st.session_state:
     st.session_state.result_filename = None
 if "error_msg" not in st.session_state:
     st.session_state.error_msg = None
+if "push_url" not in st.session_state:
+    st.session_state.push_url = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -505,7 +507,7 @@ if st.session_state.result_html:
     m3.metric("Units", len(units))
     m4.metric("Images", len(imgs))
 
-    dc1, dc2, dc3 = st.columns([2, 1, 1])
+    dc1, dc2, dc3, dc4 = st.columns([2, 1, 1, 1])
     with dc1:
         st.markdown(
             f'<div class="preview-header">'
@@ -523,12 +525,46 @@ if st.session_state.result_html:
             use_container_width=True,
         )
     with dc3:
+        ec2_ip = os.getenv("EC2_IP", "")
+        ec2_port = os.getenv("EC2_PORT", "8000")
+        if ec2_ip and st.button("🚀 Push to Server", use_container_width=True):
+            slug = slugify(name)
+            try:
+                import requests as req
+                resp = req.post(
+                    f"http://{ec2_ip}:{ec2_port}/push-page",
+                    json={"slug": slug, "html": html, "name": name},
+                    timeout=30,
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    edit_url = f"http://{ec2_ip}:{ec2_port}{result.get('edit_url', f'/draft/{slug}')}"
+                    st.session_state.push_url = edit_url
+                    st.success(f"✅ Pushed! Edit & confirm at the link below.")
+                else:
+                    st.error(f"Push failed: {resp.status_code} — {resp.text[:200]}")
+            except Exception as e:
+                st.error(f"Could not reach server: {e}")
+        elif not ec2_ip:
+            st.info("Set EC2_IP in .env to enable push")
+    with dc4:
         if st.button("🔄 Generate Another", use_container_width=True):
             st.session_state.result_html = None
             st.session_state.result_data = None
             st.session_state.result_filename = None
             st.session_state.error_msg = None
+            st.session_state.pop("push_url", None)
             st.rerun()
+
+    # Show the live edit link if pushed
+    if "push_url" in st.session_state and st.session_state.push_url:
+        st.markdown(
+            f'<div style="background:#0f1923;padding:16px 24px;border-radius:4px;margin:12px 0">'
+            f'<span style="color:#c9a050;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:Montserrat,sans-serif">Live Edit Link</span><br>'
+            f'<a href="{st.session_state.push_url}" target="_blank" style="color:#fff;font-size:16px;text-decoration:none;font-family:Montserrat,sans-serif">'
+            f'{st.session_state.push_url}</a></div>',
+            unsafe_allow_html=True,
+        )
 
     components.html(html, height=900, scrolling=True)
 
