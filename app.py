@@ -534,7 +534,7 @@ if st.session_state.result_html:
                 import requests as req
                 resp = req.post(
                     f"http://{ec2_ip}{_port_part}/push-page",
-                    json={"slug": slug, "html": html, "name": name},
+                    json={"slug": slug, "html": html, "name": name, "community_data": data},
                     timeout=30,
                 )
                 if resp.status_code == 200:
