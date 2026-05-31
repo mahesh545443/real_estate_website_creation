@@ -526,20 +526,21 @@ if st.session_state.result_html:
         )
     with dc3:
         ec2_ip = os.getenv("EC2_IP", "")
-        ec2_port = os.getenv("EC2_PORT", "80")
+        ec2_port = os.getenv("EC2_PORT", "443")
         _port_part = "" if ec2_port in ("80", "443") else f":{ec2_port}"
+        _scheme = "https" if ec2_port == "443" else "http"
         if ec2_ip and st.button("🚀 Push to Server", use_container_width=True):
             slug = slugify(name)
             try:
                 import requests as req
                 resp = req.post(
-                    f"http://{ec2_ip}{_port_part}/push-page",
+                    f"{_scheme}://{ec2_ip}{_port_part}/push-page",
                     json={"slug": slug, "html": html, "name": name, "community_data": data},
                     timeout=30,
                 )
                 if resp.status_code == 200:
                     result = resp.json()
-                    edit_url = f"http://{ec2_ip}{_port_part}{result.get('edit_url', f'/draft/{slug}')}"
+                    edit_url = f"{_scheme}://{ec2_ip}{_port_part}{result.get('edit_url', f'/draft/{slug}')}"
                     st.session_state.push_url = edit_url
                     st.success(f"✅ Pushed! Edit & confirm at the link below.")
                 else:
